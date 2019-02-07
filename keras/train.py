@@ -3,11 +3,54 @@ import os
 import matplotlib.pylab as plt
 
 from models import simple_s2s, lstm_s2s
-import numpy as np
 
+from seq2seq.models import SimpleSeq2Seq
+
+from keras.models import Sequential
+from keras.layers import TimeDistributed, Masking
+from keras.layers.embeddings import Embedding
+from keras.callbacks import Callback
+from keras.utils.vis_utils import plot_model
+import keras.backend as K
+
+import numpy as np
 from preprocessing import preprocess
 
 current_dir = os.path.dirname(os.path.realpath(__file__))
+
+def get_loss(mask_value):
+    mask_value = K.variable(mask_value)
+    def masked_categorical_crossentropy(y_true, y_pred):
+        # find out which timesteps in `y_true` are not the padding character 'PAD'
+        mask = K.all(K.equal(y_true, mask_value), axis=-1)
+        mask = 1 - K.cast(mask, K.floatx())
+        # multiply categorical_crossentropy with the mask
+        loss = K.sparse_categorical_crossentropy(y_true, y_pred) * mask
+        # take average w.r.t. the number of unmasked entries
+        return K.sum(loss) / K.sum(mask)
+    return masked_categorical_crossentropy
+
+class NBatchLogger(Callback): 
+    """ A Logger that log average performance per `display` steps. """ 
+    def __init__(self, display, data_handler): 
+        self.step = 0 
+        self.display = display
+        self.data_handler = data_handler
+
+    def on_batch_end(self, batch, logs={}): 
+        self.step += 1 
+        if self.step % self.display == 0: 
+            tr_x, tr_y = self.data_handler.gen_all()
+            tr_x = tr_x[:10]
+            tr_y = tr_y[:10]
+            res_y = self.model.predict(tr_x)
+            print('\n******************************')
+            for i in range(10):
+                print('src: ', self.data_handler.seq2text(tr_x[i], is_target=False, is_logits=False))
+                print('output: ', self.data_handler.seq2text(res_y[i], is_target=True, is_logits=True))
+                print('target: ', self.data_handler.seq2text(tr_y[i], is_target=True, is_logits=False))
+                print('---------------------')
+
 
 def sample():
     config = {
@@ -42,21 +85,12 @@ def sample():
 
 
 # 對聯應用
-def app_1():
-    maxlen = 50
-    max_features = 500
+def couplet():
+    maxlen = 30 #length of input sequence and output sequence
+    max_features = 10000 #number of words
+    embedding_dim = 256 #word embedding size
 
-    config = {
-        "input_length": maxlen+2,
-        "input_dim": 1,
-        "output_length": maxlen+2,
-        "output_dim": max_features+3,
-        # model params
-        "hidden_dim": 50,
-        "depth": 5
-    }
-
-    data_dir = os.path.join(current_dir, "..", "data/app_1", "train")
+    data_dir = os.path.join(current_dir, "..", "data/couplet", "train")
     tr_handler = preprocess(
                 os.path.join(data_dir, "in.txt"), 
                 os.path.join(data_dir, "out.txt"), 
@@ -66,10 +100,36 @@ def app_1():
 
     tr_handler.preprocess()
     tr_x, tr_y = tr_handler.gen_all()
+    tr_y = tr_y.reshape(*tr_y.shape, 1)
+    # model setting
+    model = Sequential()
+    # model.add(Masking(mask_value=0))
+    model.add(Embedding(max_features+4, embedding_dim, input_length=maxlen+2))
+    model.add(
+            SimpleSeq2Seq(
+                input_length=maxlen+2,
+                input_dim=embedding_dim, 
+                hidden_dim=256, 
+                output_length=maxlen+2, 
+                output_dim=embedding_dim,
+                depth=2,
+                dropout=0.2)
+        )
+    model.add(TimeDistributed(Dense(max_features+4, activation='softmax')))
+    masked_categorical_crossentropy = get_loss(10003)
+    model.compile(
+        optimizer='rmsprop',
+        loss=masked_categorical_crossentropy, 
+        metrics=['accuracy'])
 
+    plot_model(model, to_file='model.png', show_shapes=True)
     # training
-    model = simple_s2s(**config)
-    model.fit(np.expand_dims(tr_x, axis=2), tr_y, epochs=50, batch_size=32)
+    out_batch = NBatchLogger(display=100, data_handler=tr_handler)
+    model.fit(tr_x, tr_y, epochs=100000, batch_size=64, callbacks=[out_batch])
+
+    print(model.predict(tr_x[:1])[0])
+
+
 
     # # testing
     # model.evaluate(te_x, te_y, batch_size=32)
@@ -80,13 +140,14 @@ def app_1():
     # print(te_x[0], predicted[0])
 
 
+
 from keras.models import Model
-from keras.layers import Input, LSTM, Dense
+from keras.layers import Input, LSTM, Dense, GRU, RepeatVector
 def app_2():
-    batch_size = 64  # Batch size for training.
-    epochs = 5  # Number of epochs to train for.
-    latent_dim = 20  # Latent dimensionality of the encoding space.
-    num_samples = 1000  # Number of samples to train on.
+    batch_size = 32  # Batch size for training.
+    epochs = 100  # Number of epochs to train for.
+    latent_dim = 50  # Latent dimensionality of the encoding space.
+    num_samples = 5000  # Number of samples to train on.
     # Path to the data txt file on disk.
     data_dir = os.path.join(current_dir, "..", "data/app_1", "train")
 
@@ -156,6 +217,7 @@ def app_2():
                 # and will not include the start character.
                 decoder_target_data[i, t - 1, target_token_index[char]] = 1.
 
+    print(encoder_input_data)
     # model = lstm_s2s(num_encoder_tokens, num_decoder_tokens, latent_dim)
     # Define an input sequence and process it.
     encoder_inputs = Input(shape=(None, num_encoder_tokens))
@@ -255,7 +317,7 @@ def app_2():
         print('Decoded sentence:', decoded_sentence)
 
 if __name__ == '__main__':
-    app_2()
+    couplet()
 
 
 

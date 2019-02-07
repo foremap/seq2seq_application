@@ -8,13 +8,14 @@ import numpy as np
 import seq2seq
 from seq2seq.models import SimpleSeq2Seq
 
-def simple_s2s(input_length, input_dim, output_length, output_dim, hidden_dim, depth):
+def simple_s2s(input_length, input_dim, output_length, output_dim, hidden_dim, depth, dropout=0.0):
     model = SimpleSeq2Seq(
                 input_shape=(input_length, input_dim), 
                 hidden_dim=hidden_dim, 
                 output_length=output_length, 
                 output_dim=output_dim, 
-                depth=depth
+                depth=depth,
+                dropout=dropout
             )
     model.compile(loss='categorical_crossentropy', optimizer='rmsprop')
 

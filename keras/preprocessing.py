@@ -22,6 +22,15 @@ class preprocess(object):
         # Preprocessing source and target text sequence files
         self.vocab_src, self.vocab_tar, self.sents_src, self.sents_tar = preprocess_text(self.path_src, self.path_tar, self.max_feat)
 
+    def seq2text(self, seqs, is_target=True, is_logits=True):
+        vocab = self.vocab_tar if is_target else self.vocab_src
+        if is_logits:
+            _dict = {y:x for x,y in vocab.items()}
+            return ' '.join([_dict[prediction] for prediction in np.argmax(seqs, 1) if prediction != self.max_feat+3])
+        else:
+            _dict = {y:x for x,y in vocab.items()}
+            return ' '.join([_dict[prediction] for prediction in seqs if prediction != self.max_feat+3])
+
     def gen_seq(self, text_seq, text_seq1):
         nonzero_ind = []
         for ind, seq in enumerate(zip(text_seq, text_seq1)):
@@ -32,55 +41,54 @@ class preprocess(object):
         text_seq_Y = [text_seq1[i] for i in nonzero_ind]
         text_seq_X = [text_seq[i] for i in nonzero_ind]
         # Normalize all sequences to maxlen
-        #X = pad_sequences(text_seq_X, self.max_len)
-        #Y = pad_sequences(text_seq_Y, self.max_len)
+        # X = pad_sequences(text_seq_X, self.max_len, padding='post')
+        # Y = pad_sequences(text_seq_Y, self.max_len, padding='post')
+
         X = np.zeros((len(text_seq_X), self.max_len + 2), np.int32)
-        Y = np.zeros((len(text_seq_Y), self.max_len + 2, self.max_feat + 3), dtype=np.int32)
-        #pdb.set_trace()
+        Y = np.zeros((len(text_seq_Y), self.max_len + 2), dtype=np.int32)
+        # pdb.set_trace()
         for ind, seq in enumerate(zip(text_seq_X, text_seq_Y)):
             if len(seq[0]) <= (self.max_len):
                 X[ind, 0] = self.vocab_src["<s>"]
                 X[ind, 1:len(seq[0])+1] = seq[0]
-                X[ind, len(seq[0])+1:] = self.vocab_src["</s>"]
+                X[ind, len(seq[0])+1] = self.vocab_src["</s>"]
+                X[ind, len(seq[0])+2:] = self.vocab_src["PAD"]
 
             elif len(seq[0]) > self.max_len:
                 if self.truncate == 'post':
                     temp = seq[0][:self.max_len]
                     X[ind, 0] = self.vocab_src["<s>"]
                     X[ind, 1:len(temp)+1] = temp
-                    X[ind, len(temp)+1:] = self.vocab_src["</s>"]
+                    X[ind, len(temp)+1] = self.vocab_src["</s>"]
+                    X[ind, len(temp)+2:] = self.vocab_src["PAD"]
                 else:
                     temp = self[0][-self.max_len:]
                     X[ind, 0] = self.vocab_src["<s>"]
                     X[ind, 1:(len(temp) + 1)] = temp
-                    X[ind, (len(temp) + 1):] = self.vocab_src["</s>"]
+                    X[ind, (len(temp) + 1)] = self.vocab_src["</s>"]
+                    X[ind, (len(temp) + 2):] = self.vocab_src["PAD"]
 
             #pdb.set_trace()
-            if len(seq[1]) <= self.max_len:
-                Y[ind, 0, self.vocab_src["<s>"]] = 1
-                # 2nd dim ind + 1 because ind1 starts with 0 and 0 is filled
-                # with <s>
-                for ind1,j in enumerate(seq[1]):
-                    Y[ind, (ind1 + 1), j] = 1
-
-                for ind1 in range(len(seq[1])+1, self.max_len+2):
-                    Y[ind, ind1, self.vocab_src["</s>"]] = 1
+            if len(seq[1]) <= (self.max_len):
+                Y[ind, 0] = self.vocab_src["<s>"]
+                Y[ind, 1:len(seq[1])+1] = seq[1]
+                Y[ind, len(seq[1])+1] = self.vocab_src["</s>"]
+                Y[ind, len(seq[1])+2:] = self.vocab_src["PAD"]
 
             elif len(seq[1]) > self.max_len:
                 if self.truncate == 'post':
                     temp = seq[1][:self.max_len]
-
+                    Y[ind, 0] = self.vocab_src["<s>"]
+                    Y[ind, 1:len(temp)+1] = temp
+                    Y[ind, len(temp)+1] = self.vocab_src["</s>"]
+                    Y[ind, len(temp)+2:] = self.vocab_src["PAD"]
                 else:
-                    temp = seq[1][-self.max_len:]
-
-                Y[ind, 0, self.vocab_src["<s>"]] = 1
-
-                for ind1,j in enumerate(temp):
-                    Y[ind, (ind1 + 1), j] = 1
-
-                for ind1 in range(len(temp) + 1, self.max_len + 2):
-                    Y[ind, ind1, self.vocab_src["</s>"]] = 1
-        #pdb.set_trace()
+                    temp = self[0][-self.max_len:]
+                    Y[ind, 0] = self.vocab_src["<s>"]
+                    Y[ind, 1:(len(temp) + 1)] = temp
+                    Y[ind, (len(temp) + 1)] = self.vocab_src["</s>"]
+                    Y[ind, (len(temp) + 2):] = self.vocab_src["PAD"]
+        # pdb.set_trace()
         return X, Y
 
 
@@ -108,12 +116,11 @@ class preprocess(object):
             text_seq1.append(text2)
         
         return self.gen_seq(text_seq, text_seq1)
-            
 
 
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.realpath(__file__))
-    data_dir = os.path.join(current_dir, "..", "data/app_1", "train")
+    data_dir = os.path.join(current_dir, "..", "data/couplet", "train")
 
     pre = preprocess(
             os.path.join(data_dir, "in.txt"), 
@@ -126,5 +133,5 @@ if __name__ == "__main__":
     for e in range(1):
         print("epoch no %d"%e)
         for X, Y in pre.gen_batch():
-            print(X)
+            print(X, Y)
         #continue
